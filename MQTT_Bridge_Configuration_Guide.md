@@ -292,7 +292,7 @@ mosquitto_sub -h localhost -t '#' -v
 2. **Bridge Direction**: Uses `both` direction with `topic # both 0` to receive all messages from primary broker
 3. **Clean Session**: Set to `true` (does not persist session state)
 4. **IP Addresses**: 
-   - Remote container: 10.0.80.3 (not 10.0.60.2 as in docs)
+   - Remote container: 10.0.80.3 (not 10.0.60.3 as in docs)
    - Primary broker: 10.0.60.3
 
 ## Maintenance
