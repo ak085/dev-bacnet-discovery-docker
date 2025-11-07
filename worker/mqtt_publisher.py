@@ -91,6 +91,7 @@ class MqttPublisher:
         self.bacnet_app = None  # Will be initialized after event loop starts
         self.enable_batch_publishing = False  # Loaded from database
         self.point_last_poll = {}  # Track last poll time per point ID
+        self.pending_write_commands = []  # Queue for MQTT write commands (processed in main loop)
 
         logger.info("=== BacPipes MQTT Publisher Configuration ===")
         logger.info(f"Database: {self.db_host}:{self.db_port}/{self.db_name}")
@@ -191,6 +192,7 @@ class MqttPublisher:
             self.mqtt_client = mqtt.Client(client_id=self.mqtt_client_id)
             self.mqtt_client.on_connect = self.on_mqtt_connect
             self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
+            self.mqtt_client.on_message = self.on_mqtt_message
 
             self.mqtt_client.connect(self.mqtt_broker, self.mqtt_port, 60)
             self.mqtt_client.loop_start()
@@ -208,6 +210,10 @@ class MqttPublisher:
         if rc == 0:
             self.mqtt_connected = True
             logger.info("MQTT connection established successfully")
+
+            # Subscribe to write command topic
+            client.subscribe("bacnet/write/command", qos=1)
+            logger.info("📝 Subscribed to bacnet/write/command topic")
         else:
             logger.error(f"MQTT connection failed with code {rc}")
 
@@ -216,6 +222,94 @@ class MqttPublisher:
         if rc != 0:
             logger.warning(f"MQTT unexpected disconnection (code {rc}), will auto-reconnect")
             self.mqtt_connected = False
+
+    def on_mqtt_message(self, client, userdata, msg):
+        """Handle incoming MQTT messages (write commands) - QUEUE BASED APPROACH"""
+        try:
+            if msg.topic == "bacnet/write/command":
+                # Parse write command
+                command = json.loads(msg.payload.decode())
+                logger.info(f"📥 Received write command on MQTT: {command.get('jobId')}")
+
+                # Add to queue (don't create asyncio task from MQTT callback thread!)
+                # The main polling loop will process this queue
+                self.pending_write_commands.append(command)
+                logger.info(f"📝 Write command queued for processing (queue size: {len(self.pending_write_commands)})")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid JSON in MQTT write command: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error processing MQTT message: {e}", exc_info=True)
+
+    async def execute_write_command(self, command: Dict):
+        """Execute BACnet write command asynchronously"""
+        job_id = command.get('jobId')
+        device_ip = command.get('deviceIp')
+        device_id = command.get('deviceId')
+        object_type = command.get('objectType')
+        object_instance = command.get('objectInstance')
+        value = command.get('value')
+        priority = command.get('priority', 8)
+        release = command.get('release', False)
+        point_name = command.get('pointName', 'Unknown')
+
+        logger.info(f"📝 Executing write command {job_id}")
+        logger.info(f"  Device: {device_id} ({device_ip})")
+        logger.info(f"  Point: {point_name} ({object_type}-{object_instance})")
+        logger.info(f"  Action: {'Release priority' if release else 'Write value'} {'' if release else value}")
+        logger.info(f"  Priority: {priority}")
+
+        try:
+            # Execute BACnet write
+            success, error_msg = await self.write_bacnet_value(
+                device_ip=device_ip,
+                device_port=47808,  # Standard BACnet port
+                object_type=object_type,
+                object_instance=object_instance,
+                value=value,
+                priority=priority,
+                release=release
+            )
+
+            # Publish result
+            result = {
+                "jobId": job_id,
+                "success": success,
+                "timestamp": datetime.now(self.timezone).isoformat(),
+                "error": error_msg if not success else None,
+                "deviceId": device_id,
+                "pointName": point_name,
+                "value": value,
+                "priority": priority,
+                "release": release
+            }
+
+            self.mqtt_client.publish("bacnet/write/result", json.dumps(result), qos=1)
+
+            if success:
+                logger.info(f"✅ Write command {job_id} completed successfully")
+            else:
+                logger.error(f"❌ Write command {job_id} failed: {error_msg}")
+
+        except Exception as e:
+            logger.error(f"❌ Exception executing write command {job_id}: {e}", exc_info=True)
+
+            # Publish error result
+            result = {
+                "jobId": job_id,
+                "success": False,
+                "timestamp": datetime.now(self.timezone).isoformat(),
+                "error": str(e),
+                "deviceId": device_id,
+                "pointName": point_name,
+            }
+            self.mqtt_client.publish("bacnet/write/result", json.dumps(result), qos=1)
+
+    async def process_write_commands(self):
+        """Process any pending write commands from the queue (called from main loop)"""
+        while self.pending_write_commands:
+            command = self.pending_write_commands.pop(0)
+            logger.info(f"🔄 Processing write command from queue: {command.get('jobId')}")
+            await self.execute_write_command(command)
 
     def get_enabled_points(self) -> List[Dict]:
         """Fetch enabled points from database"""
@@ -376,6 +470,96 @@ class MqttPublisher:
         except Exception as e:
             logger.debug(f"Value extraction error: {e}")
             return str(bacnet_value)
+
+    async def write_bacnet_value(self, device_ip: str, device_port: int, object_type: str,
+                                  object_instance: int, value: Any, priority: int = 8,
+                                  release: bool = False) -> tuple[bool, Optional[str]]:
+        """
+        Write value to BACnet point with priority
+        Returns: (success: bool, error_message: Optional[str])
+        """
+        try:
+            # Import write-specific classes from BACpypes3
+            from bacpypes3.apdu import WritePropertyRequest
+            from bacpypes3.primitivedata import Null, Real, Unsigned, Boolean
+
+            # Map object types to BACnet format
+            obj_type_map = {
+                'analog-input': 'analogInput',
+                'analog-output': 'analogOutput',
+                'analog-value': 'analogValue',
+                'binary-input': 'binaryInput',
+                'binary-output': 'binaryOutput',
+                'binary-value': 'binaryValue',
+                'multi-state-input': 'multiStateInput',
+                'multi-state-output': 'multiStateOutput',
+                'multi-state-value': 'multiStateValue',
+            }
+
+            obj_type_bacnet = obj_type_map.get(object_type, object_type)
+
+            # Create BACnet address and object identifier
+            device_address = Address(f"{device_ip}:{device_port}")
+            object_id = ObjectIdentifier(f"{obj_type_bacnet},{object_instance}")
+
+            # Prepare value based on type and release flag
+            if release:
+                # Release priority (write null to priority array)
+                write_value = Null()
+            else:
+                # Convert value to appropriate BACnet type
+                if 'analog' in object_type or object_type in ['multi-state-input', 'multi-state-output', 'multi-state-value']:
+                    # Analog points use Real, multi-state use Unsigned
+                    if 'multi-state' in object_type:
+                        write_value = Unsigned(int(value))
+                    else:
+                        write_value = Real(float(value))
+                elif 'binary' in object_type:
+                    # Binary points use Unsigned (0=inactive, 1=active)
+                    write_value = Unsigned(1 if value else 0)
+                else:
+                    # Default to Real
+                    write_value = Real(float(value))
+
+            # Create write request
+            request = WritePropertyRequest(
+                objectIdentifier=object_id,
+                propertyIdentifier=PropertyIdentifier('presentValue'),
+                destination=device_address
+            )
+
+            # Set property value
+            request.propertyValue = write_value
+
+            # NOTE: We write directly to presentValue WITHOUT using priority arrays
+            # This matches the original working implementation (scripts/05_production_mqtt.py)
+            # Priority arrays are not used for setpoint/testing writes
+            logger.info(f"Writing value {value} to {object_type}:{object_instance} (priority {priority} not used for direct write)")
+
+            # Send request with timeout
+            try:
+                response = await asyncio.wait_for(
+                    self.bacnet_app.request(request),
+                    timeout=10.0  # 10 second timeout
+                )
+
+                # Write successful
+                logger.info(f"✅ Write successful (response: {type(response).__name__})")
+                return (True, None)
+
+            except asyncio.TimeoutError:
+                error_msg = "BACnet write request timeout (10s)"
+                logger.error(f"❌ {error_msg}")
+                return (False, error_msg)
+            except Exception as write_error:
+                error_msg = f"BACnet write failed: {type(write_error).__name__}: {str(write_error)}"
+                logger.error(f"❌ {error_msg}")
+                return (False, error_msg)
+
+        except Exception as e:
+            error_msg = f"BACnet write error: {str(e)}"
+            logger.error(f"❌ {error_msg}", exc_info=True)
+            return (False, error_msg)
 
     def publish_individual_topic(self, point: Dict, value: Any, timestamp: str):
         """Publish individual point topic"""
@@ -603,6 +787,10 @@ class MqttPublisher:
         # Main loop - check every 5 seconds for points that need polling
         while not shutdown_requested:
             try:
+                # Process any pending write commands from MQTT (queue-based approach)
+                await self.process_write_commands()
+
+                # Poll enabled points
                 await self.poll_and_publish()
             except Exception as e:
                 logger.error(f"Error in poll cycle: {e}", exc_info=True)

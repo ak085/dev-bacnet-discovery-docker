@@ -30,6 +30,8 @@ interface Point {
   qos: number;
   mqttTopic?: string | null;
   enabled: boolean;
+  isWritable: boolean;
+  isReadable: boolean;
 }
 
 interface PointEditorProps {
@@ -58,10 +60,11 @@ const QUANTITIES = [
   "co2",        // Carbon dioxide concentration
   "flow",       // Flow rate (air CFM, water GPM)
   "pressure",   // Static/differential pressure
-  "speed",      // Rotational speed (RPM)
+  "speed",      // Rotational speed (RPM) - for fans
+  "percent",    // Percentage (valve position, damper position, VFD output)
   "power",      // Electrical power
   "run",        // Run/enable status
-  "pos",        // Position (damper, valve, actuator)
+  "pos",        // Position (damper, valve, actuator) - same as percent
   "level",      // Tank/reservoir level
   "occupancy",  // Occupancy detection
   "enthalpy",   // Air enthalpy (energy content)
@@ -135,6 +138,9 @@ export default function PointEditor({ point, isOpen, onClose, onSave }: PointEdi
   const [pollInterval, setPollInterval] = useState(point.pollInterval.toString());
   const [qos, setQos] = useState(point.qos.toString());
 
+  // Writability configuration
+  const [isWritable, setIsWritable] = useState(point.isWritable);
+
   const [saving, setSaving] = useState(false);
 
   // Calculate MQTT topic preview
@@ -170,6 +176,7 @@ export default function PointEditor({ point, isOpen, onClose, onSave }: PointEdi
           mqttPublish,
           pollInterval: parseInt(pollInterval),
           qos: parseInt(qos),
+          isWritable,
         }),
       });
 
@@ -513,6 +520,23 @@ export default function PointEditor({ point, isOpen, onClose, onSave }: PointEdi
                   Publish to MQTT Broker
                 </label>
               </div>
+
+              {/* Point is Writable */}
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="isWritable"
+                  checked={isWritable}
+                  onChange={(e) => setIsWritable(e.target.checked)}
+                  className="rounded"
+                />
+                <label htmlFor="isWritable" className="text-sm font-medium">
+                  Point is Writable (Enable write commands)
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground -mt-3">
+                Check this to allow BACnet writes to this point. Auto-detected during discovery but can be overridden.
+              </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Poll Interval */}

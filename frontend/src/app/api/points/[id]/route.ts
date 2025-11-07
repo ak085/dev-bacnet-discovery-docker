@@ -68,6 +68,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       pollInterval,
       qos,
       enabled,
+      isWritable,
     } = body;
 
     // Prepare update data
@@ -86,6 +87,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     if (pollInterval !== undefined) updateData.pollInterval = parseInt(pollInterval);
     if (qos !== undefined) updateData.qos = parseInt(qos);
     if (enabled !== undefined) updateData.enabled = enabled;
+    if (isWritable !== undefined) updateData.isWritable = isWritable;
 
     // Get current point data to generate MQTT topic
     const currentPoint = await prisma.point.findUnique({

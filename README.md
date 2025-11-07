@@ -27,9 +27,10 @@ BacPipes is a distributed BACnet-to-MQTT data pipeline designed for enterprise b
 - ✅ **M2: BACnet Discovery** - Web UI for network scanning, device/point discovery
 - ✅ **M3: Point Configuration** - Haystack tagging, MQTT topic generation
 - ✅ **M4: MQTT Publishing** - Real-time data publishing with per-point intervals
-- ✅ **M5: Monitoring Dashboard** - Real-time point values, batch publishing controls
-- 🚧 **M6: Time-Series Storage** - TimescaleDB integration (planned)
-- ⏳ **M7: Central Replication** - PostgreSQL logical replication (planned)
+- ✅ **M5: Monitoring Dashboard** - Real-time MQTT data streaming, live point values
+- ✅ **M6: BACnet Write Commands** - Web UI for writing setpoints with priority control
+- ⏳ **M7: Time-Series Storage** - TimescaleDB integration (planned)
+- ⏳ **M8: Central Replication** - PostgreSQL logical replication (planned)
 
 See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) for full roadmap.
 
@@ -252,6 +253,155 @@ BacPipes/
 ├── CLAUDE.md                  # Project documentation
 ├── STRATEGIC_PLAN.md          # Architecture roadmap
 └── README.md                  # This file
+```
+
+---
+
+## User Guide
+
+### Monitoring Dashboard
+
+Access real-time MQTT data at http://localhost:3001/monitoring
+
+**Features:**
+- **Live Data Stream**: Auto-updating point values via Server-Sent Events (SSE)
+- **In-Place Updates**: Rows update without scrolling (one row per point)
+- **Natural Scrolling**: Use regular webpage scrolling, sticky headers
+- **Topic Filtering**: Search/filter by MQTT topic
+- **Pause/Resume**: Pause data stream while investigating
+- **Write Commands**: Click "Write" button on any point (see below)
+
+**Connection Status:**
+- 🟢 Green = Connected to MQTT broker
+- 🟡 Yellow = Connecting...
+- 🔴 Red = Disconnected
+
+### BACnet Write Commands
+
+Send write commands to BACnet devices from the monitoring page.
+
+**Steps:**
+1. Navigate to Monitoring page
+2. Find the point you want to write to
+3. Click the "✏️ Write" button
+4. Enter new value
+5. Select priority level (1-16, default: 8)
+6. Click "Send Write Command"
+
+**Priority Levels:**
+- **1-2**: Life safety (highest priority)
+- **8**: Manual operator override (recommended)
+- **16**: Scheduled/default (lowest priority)
+
+**Release Priority:**
+- Check "Release Priority" to remove manual override
+- Point reverts to next active priority or default value
+
+**Supported Object Types:**
+- All analog types (AI, AO, AV)
+- All binary types (BI, BO, BV)
+- Multi-state values (MSV, MSI, MSO)
+
+**Write Result Feedback:**
+- ✅ Success: "Write command sent: {value}"
+- ❌ Error: Displays error message
+
+### Timezone Configuration
+
+Configure timezone for MQTT timestamps in Settings page.
+
+**Steps:**
+1. Go to http://localhost:3001/settings
+2. Select timezone from dropdown (50+ timezones)
+3. Click "Save Settings"
+4. **Restart worker**: `docker compose restart bacnet-worker`
+5. Wait 30-60 seconds for fresh data
+
+**Available Timezones:**
+- `Asia/Kuala_Lumpur` → UTC+8
+- `Asia/Singapore` → UTC+8
+- `Asia/Bangkok` → UTC+7
+- `Asia/Dubai` → UTC+4
+- `Europe/Paris` → UTC+1
+- `America/New_York` → UTC-5
+- And 500+ more IANA timezones
+
+**MQTT Timestamps:**
+```json
+{
+  "value": 22.5,
+  "timestamp": "2025-11-07T08:41:03+08:00",  // Your configured timezone
+  "units": "degreesCelsius"
+}
+```
+
+**Important**: Worker must be restarted to apply timezone changes!
+
+---
+
+## Service Management
+
+### Shutdown Commands
+
+```bash
+cd /home/ak101/BacPipes
+
+# Stop all services (graceful)
+docker compose stop
+
+# Stop and remove containers (keeps database data)
+docker compose down
+
+# Complete cleanup (⚠️ DELETES DATABASE!)
+docker compose down -v
+```
+
+### Startup Commands
+
+```bash
+cd /home/ak101/BacPipes
+
+# Start all services
+docker compose up -d
+
+# Start with live logs
+docker compose up
+
+# Force rebuild
+docker compose up -d --build
+```
+
+### Restart Commands
+
+```bash
+cd /home/ak101/BacPipes
+
+# Restart all services
+docker compose restart
+
+# Restart worker only (after timezone change)
+docker compose restart bacnet-worker
+
+# Restart frontend only (after code changes)
+docker compose restart frontend
+
+# Force recreate
+docker compose up -d --force-recreate
+```
+
+### Check Service Status
+
+```bash
+cd /home/ak101/BacPipes
+
+# View running services
+docker compose ps
+
+# Check worker health
+docker inspect bacpipes-worker --format='{{.State.Health.Status}}'
+
+# View resource usage
+docker stats
 ```
 
 ---
@@ -501,12 +651,31 @@ docker compose restart
 
 ## Roadmap
 
-See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) for detailed 7-phase implementation plan:
+See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) for detailed implementation plan:
 
-- **Phase 1-5**: Complete (Foundation → Monitoring)
-- **Phase 6**: TimescaleDB integration (in progress)
-- **Phase 7**: Multi-site replication (planned)
-- **Phase 8+**: ML optimization, advanced features
+- **Phase 1-6**: ✅ Complete (Foundation → Write Commands)
+- **Phase 7**: TimescaleDB integration (planned)
+- **Phase 8**: Multi-site replication (planned)
+- **Phase 9+**: ML optimization, advanced features
+
+### Completed Features (v0.6)
+
+- ✅ Docker Compose deployment
+- ✅ Web-based BACnet discovery
+- ✅ Haystack tagging system
+- ✅ MQTT publishing with per-point intervals
+- ✅ Real-time monitoring dashboard
+- ✅ BACnet write commands with priority control
+- ✅ Configurable timezone support
+- ✅ SSE-based live data streaming
+
+### Next Up (v0.7)
+
+- [ ] TimescaleDB time-series storage
+- [ ] Historical data visualization
+- [ ] Grafana dashboard templates
+- [ ] Data export/import tools
+- [ ] Alert/notification system
 
 ---
 
