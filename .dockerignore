@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+bac0_env/
+venv/
+*.egg-info
+
+# Node
+node_modules/
+.next/
+npm-debug.log
+
+# Database
+postgres_data/
+*.sql
+*.dump
+
+# Documentation
+*.md
+CLAUDE.md
+README.md
+
+# Config
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
