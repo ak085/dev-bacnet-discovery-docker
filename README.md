@@ -94,40 +94,129 @@ open http://localhost:3001
    - Check logs: `docker compose logs -f bacnet-worker`
    - Monitor dashboard: http://localhost:3001
 
+### MQTT Bridge Setup (Optional - for Remote Monitoring)
+
+To forward data to a remote/cloud MQTT broker for centralized monitoring:
+
+1. **Deploy Bridge Configuration** to local MQTT broker (10.0.60.2):
+   ```bash
+   # Copy bridge config from docs/
+   scp docs/mqtt-bridge-config.conf user@10.0.60.2:/tmp/bridge.conf
+
+   # SSH to broker and install
+   ssh user@10.0.60.2
+   sudo cp /tmp/bridge.conf /etc/mosquitto/conf.d/bridge.conf
+   sudo chown mosquitto:mosquitto /etc/mosquitto/conf.d/bridge.conf
+   sudo chmod 644 /etc/mosquitto/conf.d/bridge.conf
+
+   # Restart Mosquitto
+   sudo systemctl restart mosquitto
+
+   # Verify bridge connection
+   sudo journalctl -u mosquitto -f | grep bridge
+   ```
+
+2. **Verify Bridge Operation**:
+   ```bash
+   # On remote broker (10.0.60.3), subscribe to forwarded topics
+   mosquitto_sub -h 10.0.60.3 -t "klcc/#" -v
+   mosquitto_sub -h 10.0.60.3 -t "remote/#" -v
+   ```
+
+3. **Security** (Production):
+   - Uncomment TLS section in `mqtt-bridge-config.conf`
+   - Generate SSL certificates for both brokers
+   - Update bridge to use port 8883
+   - See bridge config file for complete TLS setup
+
+**Bridge Topics**:
+- `klcc/#` → Forwards all KLCC site data (QoS 1)
+- `menara/#` → Forwards all Menara site data (QoS 1)
+- `#` → Forwards all topics with `remote/` prefix (QoS 0)
+
+**Bridge Features**:
+- Auto-reconnect every 30 seconds on disconnect
+- Clean session: false (persists across restarts)
+- Keep-alive: 60 seconds
+- Client ID: `bridge_local_to_remote`
+
+See `docs/mqtt-bridge-config.conf` for complete configuration, troubleshooting guide, and TLS setup.
+
 ---
 
 ## Architecture
 
+### Current System (Edge Collection)
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│               SITE (Docker Compose Stack)                   │
+│            BacPipes (Edge System) - Docker Compose          │
+│                   http://localhost:3001                     │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌──────────┐  ┌──────────────┐  ┌────────────────┐       │
-│  │PostgreSQL├─→│ Next.js UI   ├─→│ BacPipes Worker│       │
-│  │(Config DB)│  │(Web GUI)     │  │(Python+BACpy3) │       │
+│  │PostgreSQL├─→│ Next.js UI   │  │ BacPipes Worker│       │
+│  │(Config)  │  │(Web GUI)     │  │(Python+BACpy3) │       │
+│  │Port 5434 │  │Port 3001     │  │(Host network)  │       │
 │  └──────────┘  └──────────────┘  └───────┬────────┘       │
 │                                           │                 │
-│                                           ↓                 │
-│                                   ┌───────────────┐        │
-│                                   │ MQTT Broker   │        │
-│                                   │(Mosquitto)    │        │
-│                                   └───────┬───────┘        │
-│                                           │                 │
-│         ┌─────────────────────────────────┘                │
-│         │                                                   │
-│         ↓                                                   │
-│  ┌────────────────┐                                        │
-│  │ BACnet Devices │ ← DDCs, Controllers, Sensors          │
-│  └────────────────┘                                        │
-└─────────────────────────────────────────────────────────────┘
+│  ┌──────────────┐  ┌──────────────┐      │                │
+│  │ TimescaleDB  │←─│  Telegraf    │      │                │
+│  │(Time-series) │  │(MQTT→DB)     │      │                │
+│  │Port 5435     │  │              │      │                │
+│  └──────┬───────┘  └──────┬───────┘      │                │
+│         │                  │              │                │
+│         ↓ Grafana          │              │                │
+│  ┌──────────────┐          │              │                │
+│  │   Grafana    │          │              │                │
+│  │  Dashboard   │          │              │                │
+│  │  Port 3002   │          │              │                │
+│  └──────────────┘          │              │                │
+│                            ↓              ↓                │
+│         BACnet Network ←───┘              └─→ MQTT         │
+│                                               Publish      │
+└───────────────────────────────────────────────┬────────────┘
+                                                │
+                                                ↓
+                                 ┌──────────────────────────┐
+                                 │  MQTT Broker (External)  │
+                                 │  LXC #2: 10.0.60.2:1883  │
+                                 │  (Shared Infrastructure) │
+                                 └──────────┬───────────────┘
+                                            │
+                       MQTT Bridge ─────────┤
+                       (Configured on       │
+                        broker 60.2)        │
+                                            ↓
+                                 ┌──────────────────────────┐
+                                 │  Remote MQTT Broker      │
+                                 │  LXC #3: 10.0.60.3:1883  │
+                                 │  (Cloud/Central)         │
+                                 └──────────┬───────────────┘
+                                            │
+                                            ↓
+                      ┌────────────────────────────────────────┐
+                      │  BacPipes-Remote (Cloud Monitoring)    │
+                      │  Separate Deployment                   │
+                      │  http://remote-host:3003               │
+                      │  See: BacPipes-Remote repository       │
+                      └────────────────────────────────────────┘
 ```
 
-**Future Architecture** (See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md)):
-- TimescaleDB for time-series storage
-- PostgreSQL logical replication to central server
-- Grafana dashboards
+### Data Flow
+
+1. **BACnet Discovery**: Worker discovers devices on 192.168.1.0/24
+2. **Point Configuration**: Web UI tags points with Haystack metadata
+3. **Polling**: Worker reads BACnet points at configured intervals
+4. **Local Storage**: Telegraf writes to TimescaleDB for local Grafana
+5. **MQTT Publishing**: Worker publishes to external broker 10.0.60.2
+6. **Bridge Forward**: MQTT bridge forwards topics to remote broker 10.0.60.3
+7. **Cloud Monitoring**: BacPipes-Remote consumes data from remote broker
+
+### Future Enhancements
+- PostgreSQL logical replication for configuration sync
 - ML inference at edge
+- Advanced analytics and alerting
 
 ---
 
