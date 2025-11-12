@@ -98,36 +98,96 @@ open http://localhost:3001
 
 To forward data to a remote/cloud MQTT broker for centralized monitoring:
 
-1. **Deploy Bridge Configuration** to local MQTT broker (10.0.60.2):
-   ```bash
-   # Copy bridge config from docs/
-   scp docs/mqtt-bridge-config.conf user@10.0.60.2:/tmp/bridge.conf
+**Prerequisites:**
+- Mosquitto 2.0.22+ installed on broker 10.0.60.2
+- Remote broker running at 10.0.60.3
 
-   # SSH to broker and install
-   ssh user@10.0.60.2
-   sudo cp /tmp/bridge.conf /etc/mosquitto/conf.d/bridge.conf
-   sudo chown mosquitto:mosquitto /etc/mosquitto/conf.d/bridge.conf
-   sudo chmod 644 /etc/mosquitto/conf.d/bridge.conf
+**Step 1: Configure Main Mosquitto Config**
 
-   # Restart Mosquitto
-   sudo systemctl restart mosquitto
+SSH to local broker and edit `/etc/mosquitto/mosquitto.conf`:
+```bash
+ssh user@10.0.60.2
+sudo nano /etc/mosquitto/mosquitto.conf
+```
 
-   # Verify bridge connection
-   sudo journalctl -u mosquitto -f | grep bridge
-   ```
+**Required configuration** (NO leading spaces!):
+```conf
+# Mosquitto 2.0.22 Configuration
+# Allow remote connections
 
-2. **Verify Bridge Operation**:
-   ```bash
-   # On remote broker (10.0.60.3), subscribe to forwarded topics
-   mosquitto_sub -h 10.0.60.3 -t "klcc/#" -v
-   mosquitto_sub -h 10.0.60.3 -t "remote/#" -v
-   ```
+# Listen on all interfaces, port 1883
+listener 1883 0.0.0.0
+allow_anonymous true
 
-3. **Security** (Production):
-   - Uncomment TLS section in `mqtt-bridge-config.conf`
-   - Generate SSL certificates for both brokers
-   - Update bridge to use port 8883
-   - See bridge config file for complete TLS setup
+# Persistence
+persistence true
+persistence_location /var/lib/mosquitto/
+
+# Logging
+log_dest file /var/log/mosquitto/mosquitto.log
+log_type all
+
+# Include bridge configuration
+include /etc/mosquitto/bridge.conf
+```
+
+**Important**: Ensure NO leading spaces in config file! Use `cat -A /etc/mosquitto/mosquitto.conf` to verify.
+
+**Step 2: Deploy Bridge Configuration**
+
+```bash
+# Copy bridge config from BacPipes repo
+scp docs/mqtt-bridge-config.conf user@10.0.60.2:/tmp/bridge.conf
+
+# SSH to broker and install
+ssh user@10.0.60.2
+sudo cp /tmp/bridge.conf /etc/mosquitto/bridge.conf
+sudo chown mosquitto:mosquitto /etc/mosquitto/bridge.conf
+sudo chmod 644 /etc/mosquitto/bridge.conf
+```
+
+**Step 3: Test and Restart**
+
+```bash
+# Test configuration syntax
+sudo mosquitto -c /etc/mosquitto/mosquitto.conf -v
+# (Press Ctrl+C if no errors)
+
+# Restart Mosquitto service
+sudo systemctl restart mosquitto
+sudo systemctl status mosquitto
+# Should show "active (running)"
+
+# Verify listening on correct port
+sudo ss -tulpn | grep 1883
+# Should show: tcp LISTEN 0.0.0.0:1883
+
+# Verify bridge connection
+sudo journalctl -u mosquitto -f | grep bridge
+# Look for: "Connecting bridge bridge-to-remote (10.0.60.3:1883)"
+```
+
+**Step 4: Verify Bridge Operation**
+
+```bash
+# On local broker, publish test message
+mosquitto_pub -h 10.0.60.2 -t "klcc/test" -m "hello from local"
+
+# On remote broker (10.0.60.3), subscribe to forwarded topics
+mosquitto_sub -h 10.0.60.3 -t "klcc/#" -v
+# Should see: klcc/test hello from local
+
+# Check prefixed topics
+mosquitto_sub -h 10.0.60.3 -t "remote/#" -v
+# Should see: remote/klcc/test hello from local
+```
+
+**Step 5: Security** (Production)
+
+- Uncomment TLS section in `mqtt-bridge-config.conf`
+- Generate SSL certificates for both brokers
+- Update bridge to use port 8883
+- See bridge config file for complete TLS setup
 
 **Bridge Topics**:
 - `klcc/#` → Forwards all KLCC site data (QoS 1)
