@@ -19,6 +19,48 @@ services:
       - bacpipes-network
     restart: unless-stopped
 
+  # MQTT Broker - Integrated edge broker for this site
+  # Receives data from bacnet-worker, optionally bridges to cloud
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.22
+    container_name: bacpipes-mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/config/bridge.conf:/mosquitto/config/bridge.conf
+      - ./mosquitto/config/bridges:/mosquitto/config/bridges
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+    networks:
+      - bacpipes-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/broker/uptime' -C 1 -W 1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # MQTT Remote Broker (simulates 10.0.60.3)
+  # Receives bridged data from local broker
+  mqtt-remote:
+    image: eclipse-mosquitto:2.0.22
+    container_name: bacpipes-mqtt-remote
+    ports:
+      - "1884:1883"
+    volumes:
+      - ./mosquitto/remote/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mqtt_remote_data:/mosquitto/data
+      - mqtt_remote_log:/mosquitto/log
+    networks:
+      - bacpipes-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/broker/uptime' -C 1 -W 1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   frontend:
     build:
       context: ./frontend
@@ -49,6 +91,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
       frontend:
         condition: service_started
     environment:
@@ -61,8 +105,8 @@ services:
       # BACnet configuration
       BACNET_IP: ${BACNET_IP:-192.168.1.35}
       BACNET_PORT: ${BACNET_PORT:-47808}
-      # MQTT configuration (external broker on separate LXC)
-      MQTT_BROKER: ${MQTT_BROKER:-10.0.60.2}  # External broker LXC
+      # MQTT configuration (mqtt-broker container, accessed via host port)
+      MQTT_BROKER: ${MQTT_BROKER:-localhost}  # mqtt-broker container via host networking
       MQTT_PORT: ${MQTT_PORT:-1883}           # Standard MQTT port
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-bacpipes_worker}
       # Polling configuration
@@ -103,9 +147,11 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
     environment:
-      # MQTT configuration (external broker on separate LXC)
-      MQTT_BROKER: ${MQTT_BROKER:-10.0.60.2}  # External broker LXC
+      # MQTT configuration (mqtt-broker container, accessed via host port)
+      MQTT_BROKER: ${MQTT_BROKER:-localhost}  # mqtt-broker container via host networking
       MQTT_PORT: ${MQTT_PORT:-1883}           # Standard MQTT port
       # TimescaleDB connection
       TIMESCALEDB_HOST: localhost  # Use localhost due to host networking
@@ -147,4 +193,12 @@ volumes:
   timescaledb_data:
     driver: local
   grafana_data:
+    driver: local
+  mqtt_data:
+    driver: local
+  mqtt_log:
+    driver: local
+  mqtt_remote_data:
+    driver: local
+  mqtt_remote_log:
     driver: local
