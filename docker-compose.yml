@@ -153,6 +153,7 @@ services:
       # MQTT configuration (mqtt-broker container, accessed via host port)
       MQTT_BROKER: ${MQTT_BROKER:-localhost}  # mqtt-broker container via host networking
       MQTT_PORT: ${MQTT_PORT:-1883}           # Standard MQTT port
+      MQTT_CLIENT_ID_TELEGRAF: bacpipes_telegraf_edge  # Unique client ID for edge platform
       # TimescaleDB connection
       TIMESCALEDB_HOST: localhost  # Use localhost due to host networking
       TIMESCALEDB_PORT: 5435        # Use host-exposed port

@@ -33,11 +33,11 @@ CONFIG_DB_PORT = int(os.getenv('CONFIG_DB_PORT', '5434'))
 CONFIG_DB_NAME = os.getenv('CONFIG_DB_NAME', 'bacpipes')
 CONFIG_DB_USER = os.getenv('CONFIG_DB_USER', 'anatoli')
 
-# MQTT Configuration (loaded from database, but client_id is unique)
+# MQTT Configuration (from environment variables, with database override)
 mqtt_config = {
-    'broker': '10.0.60.2',  # Default fallback
-    'port': 1883,
-    'client_id': 'bacpipes_telegraf'  # Unique client ID to avoid conflicts
+    'broker': os.getenv('MQTT_BROKER', 'localhost'),  # Read from env, fallback to localhost
+    'port': int(os.getenv('MQTT_PORT', '1883')),
+    'client_id': os.getenv('MQTT_CLIENT_ID_TELEGRAF', 'bacpipes_telegraf')  # Unique per deployment
 }
 
 # Database connections
@@ -176,12 +176,17 @@ def on_message(client, userdata, msg):
             'point_id': payload.get('pointId'),
             'point_name': payload.get('pointName'),
             'haystack_name': payload.get('haystackName'),
+            'dis': payload.get('dis'),
             'value': payload.get('value'),
             'units': payload.get('units'),
             'quality': payload.get('quality', 'good'),
             'poll_duration': payload.get('pollDuration'),
             'poll_cycle': payload.get('pollCycle')
         }
+
+        # Debug: Log first few messages to verify "dis" extraction
+        if stats['messages_written'] < 3:
+            logger.info(f"DEBUG: dis value = '{data.get('dis')}' for haystack = {data.get('haystack_name')}")
 
         # Insert into TimescaleDB
         insert_sensor_reading(data)
@@ -210,14 +215,14 @@ def insert_sensor_reading(data):
             time, site_id, equipment_type, equipment_id,
             device_id, device_name, device_ip,
             object_type, object_instance,
-            point_id, point_name, haystack_name,
+            point_id, point_name, haystack_name, dis,
             value, units, quality,
             poll_duration, poll_cycle
         ) VALUES (
             %(time)s, %(site_id)s, %(equipment_type)s, %(equipment_id)s,
             %(device_id)s, %(device_name)s, %(device_ip)s,
             %(object_type)s, %(object_instance)s,
-            %(point_id)s, %(point_name)s, %(haystack_name)s,
+            %(point_id)s, %(point_name)s, %(haystack_name)s, %(dis)s,
             %(value)s, %(units)s, %(quality)s,
             %(poll_duration)s, %(poll_cycle)s
         )
