@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sensor_readings (
   point_id INTEGER,
   point_name TEXT,
   haystack_name TEXT,
+  dis TEXT,
 
   -- Measurement data
   value DOUBLE PRECISION,
