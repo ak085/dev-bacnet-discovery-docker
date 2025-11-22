@@ -29,10 +29,11 @@ BacPipes is a distributed BACnet-to-MQTT data pipeline designed for enterprise b
 - ✅ **M4: MQTT Publishing** - Real-time data publishing with per-point intervals
 - ✅ **M5: Monitoring Dashboard** - Real-time MQTT data streaming, live point values
 - ✅ **M6: BACnet Write Commands** - Web UI for writing setpoints with priority control
-- ⏳ **M7: Time-Series Storage** - TimescaleDB integration (planned)
-- ⏳ **M8: Central Replication** - PostgreSQL logical replication (planned)
+- ✅ **M7: Time-Series Storage** - TimescaleDB integration (complete)
+- ✅ **M8: Monitoring Dashboard** - Real-time visualization on port 3003 (complete)
+- ⏳ **M9: Central Replication** - Site-to-remote data sync (in progress)
 
-See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) for full roadmap.
+See [ROADMAP.md](ROADMAP.md) for full development roadmap.
 
 ---
 
@@ -226,11 +227,11 @@ See `docs/mqtt-bridge-config.conf` for complete configuration, troubleshooting g
 │  │Port 5435     │  │              │      │                │
 │  └──────┬───────┘  └──────┬───────┘      │                │
 │         │                  │              │                │
-│         ↓ Grafana          │              │                │
+│         ↓ Monitoring       │              │                │
 │  ┌──────────────┐          │              │                │
-│  │   Grafana    │          │              │                │
+│  │  Monitoring  │          │              │                │
 │  │  Dashboard   │          │              │                │
-│  │  Port 3002   │          │              │                │
+│  │  Port 3003   │          │              │                │
 │  └──────────────┘          │              │                │
 │                            ↓              ↓                │
 │         BACnet Network ←───┘              └─→ MQTT         │
@@ -268,7 +269,7 @@ See `docs/mqtt-bridge-config.conf` for complete configuration, troubleshooting g
 1. **BACnet Discovery**: Worker discovers devices on 192.168.1.0/24
 2. **Point Configuration**: Web UI tags points with Haystack metadata
 3. **Polling**: Worker reads BACnet points at configured intervals
-4. **Local Storage**: Telegraf writes to TimescaleDB for local Grafana
+4. **Local Storage**: Telegraf writes to TimescaleDB for monitoring dashboard
 5. **MQTT Publishing**: Worker publishes to external broker 10.0.60.2
 6. **Bridge Forward**: MQTT bridge forwards topics to remote broker 10.0.60.3
 7. **Cloud Monitoring**: BacPipes-Remote consumes data from remote broker
@@ -794,18 +795,20 @@ docker compose restart
 - [ ] Role-based access control (RBAC)
 - [ ] Audit logging
 
-**For WAN deployment**, see [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) security section.
+**For WAN deployment**, see [ROADMAP.md](ROADMAP.md) for multi-site security considerations.
 
 ---
 
 ## Roadmap
 
-See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) for detailed implementation plan:
+See [ROADMAP.md](ROADMAP.md) for detailed development roadmap and future plans.
 
-- **Phase 1-6**: ✅ Complete (Foundation → Write Commands)
-- **Phase 7**: TimescaleDB integration (planned)
-- **Phase 8**: Multi-site replication (planned)
-- **Phase 9+**: ML optimization, advanced features
+**Current Status (v1.0.0)**:
+- ✅ Core features complete (Discovery, Configuration, MQTT Publishing, Write Commands)
+- ✅ TimescaleDB integration complete
+- ✅ Monitoring dashboard on port 3003
+- ⏳ Site-to-remote data sync (in progress)
+- 🔜 Multi-site management, advanced analytics, ML integration
 
 ### Completed Features (v0.6)
 
@@ -867,9 +870,9 @@ MIT License - See [LICENSE](LICENSE) file
 ## Support
 
 - **Documentation**: See [CLAUDE.md](CLAUDE.md) for detailed technical docs
-- **Architecture**: See [STRATEGIC_PLAN.md](STRATEGIC_PLAN.md) for system design
-- **Issues**: Create issue on Gitea repository
-- **Email**: support@yourcompany.com (replace with actual)
+- **Roadmap**: See [ROADMAP.md](ROADMAP.md) for development plans
+- **Migration History**: See [MIGRATION_TO_MODULAR_ARCHITECTURE.md](MIGRATION_TO_MODULAR_ARCHITECTURE.md)
+- **Issues**: Create issue on Gitea repository (http://10.0.10.2:30008/ak101/dev-bacnet-discovery-docker)
 
 ---
 
